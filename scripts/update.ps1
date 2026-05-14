@@ -1,11 +1,11 @@
-# WhatsApp Photo Downloader — Updater (Windows)
+# WhatsApp Photo Downloader - Updater (Windows)
 # Run via update.bat or: powershell -ExecutionPolicy Bypass -File update.ps1
 
 $InstallDir = "$env:LOCALAPPDATA\WhatsAppPhotoDownloader"
 
-$Host.UI.RawUI.WindowTitle = "WhatsApp Photo Downloader — Updater"
+$Host.UI.RawUI.WindowTitle = "WhatsApp Photo Downloader - Updater"
 Write-Host ""
-Write-Host "  WhatsApp Photo Downloader — Updater" -ForegroundColor Green
+Write-Host "  WhatsApp Photo Downloader - Updater" -ForegroundColor Green
 Write-Host "  =====================================" -ForegroundColor Green
 Write-Host ""
 
@@ -31,13 +31,13 @@ $after  = git rev-parse HEAD 2>$null
 Pop-Location
 
 if ($before -eq $after) {
-  Write-Host "  [OK] Already up to date — no changes." -ForegroundColor Green
+  Write-Host "  [OK] Already up to date - no changes." -ForegroundColor Green
 } else {
   Write-Host "  [OK] Update downloaded!" -ForegroundColor Green
   Write-Host ""
   Write-Host "  To apply the update:" -ForegroundColor Yellow
   Write-Host "    1. Go to chrome://extensions/"
-  Write-Host "    2. Click the refresh (↺) icon on 'WhatsApp Photo Downloader'"
+  Write-Host "    2. Click the refresh icon on 'WhatsApp Photo Downloader'"
   Write-Host "    3. Reload the WhatsApp Web tab"
   Write-Host ""
 
