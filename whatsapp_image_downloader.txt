@@ -1,0 +1,368 @@
+// ============================================================
+//  WhatsApp Web – Descargador de Imágenes
+//  CÓMO USARLO:
+//  1. Abre https://web.whatsapp.com e inicia sesión
+//  2. Haz clic en el chat del que quieres descargar imágenes
+//  3. Presiona F12 (o clic derecho → Inspeccionar) para abrir DevTools
+//  4. Haz clic en la pestaña "Console" (Consola)
+//  5. Pega este script completo y presiona Enter
+//  6. Aparecerá un panel verde — ingresa las fechas y haz clic en Iniciar
+// ============================================================
+
+(function () {
+  if (document.getElementById('wa-img-dl-panel')) {
+    document.getElementById('wa-img-dl-panel').remove();
+  }
+
+  // ── UI ───────────────────────────────────────────────────
+  const panel = document.createElement('div');
+  panel.id = 'wa-img-dl-panel';
+  Object.assign(panel.style, {
+    position:     'fixed',
+    top:          '50%',
+    left:         '50%',
+    transform:    'translate(-50%, -50%)',
+    zIndex:       '2147483647',
+    background:   '#fff',
+    borderRadius: '16px',
+    boxShadow:    '0 8px 40px rgba(0,0,0,0.3)',
+    padding:      '28px 32px',
+    width:        '360px',
+    fontFamily:   'Segoe UI, Arial, sans-serif',
+    fontSize:     '14px',
+    color:        '#111',
+    userSelect:   'none',
+  });
+
+  panel.innerHTML = `
+    <div style="font-size:18px;font-weight:700;margin-bottom:6px;">📸 Descargador de Imágenes de WhatsApp</div>
+    <div style="color:#555;margin-bottom:18px;line-height:1.5;font-size:13px;">
+      Abre el chat que quieras y elige un rango de fechas.<br>
+      Deja una fecha en blanco para incluir todos los mensajes.
+    </div>
+
+    <label style="display:block;margin-bottom:4px;font-weight:600;">Desde</label>
+    <input id="wa-start" type="date"
+      style="width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:8px;font-size:14px;box-sizing:border-box;margin-bottom:12px;">
+
+    <label style="display:block;margin-bottom:4px;font-weight:600;">Hasta</label>
+    <input id="wa-end" type="date"
+      style="width:100%;padding:8px 10px;border:1px solid #ccc;border-radius:8px;font-size:14px;box-sizing:border-box;margin-bottom:20px;">
+
+    <button id="wa-start-btn"
+      style="width:100%;padding:12px;background:#25d366;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;transition:opacity .2s;">
+      ▶ Iniciar Descarga
+    </button>
+
+    <div id="wa-status"
+      style="margin-top:14px;color:#444;min-height:38px;line-height:1.6;text-align:center;font-size:13px;"></div>
+
+    <div style="margin-top:10px;text-align:right;">
+      <span id="wa-close" style="color:#bbb;cursor:pointer;font-size:12px;">✕ Close</span>
+    </div>
+  `;
+
+  document.body.appendChild(panel);
+  document.getElementById('wa-close').onclick = () => panel.remove();
+
+  // ── Utilities ────────────────────────────────────────────
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  const setStatus = (html, color = '#444') => {
+    const el = document.getElementById('wa-status');
+    if (!el) return;
+    el.style.color = color;
+    el.innerHTML = html;
+    console.log('[WA-DL]', html.replace(/<[^>]+>/g, ''));
+  };
+
+  // Parse "[3:42 PM, 4/21/2026] Name:" or "[15:42, 21/4/2026] Name:"
+  function parsePlainTextDate(ppt) {
+    if (!ppt) return null;
+    // Handles separators: / and .  and various time formats
+    const m = ppt.match(/\[\s*[\d:APMapm\s]+[,،]\s*(\d{1,2})[\/.](\d{1,2})[\/.](\d{2,4})/);
+    if (!m) return null;
+    const year = m[3].length === 2 ? 2000 + +m[3] : +m[3];
+    let day, month;
+    if (+m[1] > 12)       { day = +m[1]; month = +m[2]; }
+    else if (+m[2] > 12)  { day = +m[2]; month = +m[1]; }
+    else                  { day = +m[1]; month = +m[2]; }  // default D/M
+    const d = new Date(year, month - 1, day);
+    return isNaN(d) ? null : d;
+  }
+
+  // Parse WhatsApp date separator bubbles: "Today", "Yesterday", "April 21, 2026", "21/04/2026"
+  function parseSeparatorText(text) {
+    const t = text.trim();
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    if (/^today$/i.test(t)) return today;
+    if (/^yesterday$/i.test(t)) {
+      const d = new Date(today); d.setDate(d.getDate() - 1); return d;
+    }
+    const d = new Date(t);
+    if (!isNaN(d)) { d.setHours(0, 0, 0, 0); return d; }
+    return null;
+  }
+
+  // Find the scrollable chat message pane
+  function findScrollContainer() {
+    const main = document.getElementById('main');
+    if (!main) return null;
+
+    // Strategy 1: data-testid
+    const byTestId = main.querySelector('[data-testid="conversation-panel-messages"]');
+    if (byTestId) return byTestId;
+
+    // Strategy 2: computed overflow — pick the div with the tallest scrollable area
+    let best = null, bestExtra = 0;
+    for (const el of main.querySelectorAll('div')) {
+      const cs = getComputedStyle(el);
+      if (cs.overflowY === 'scroll' || cs.overflowY === 'auto') {
+        const extra = el.scrollHeight - el.clientHeight;
+        if (extra > bestExtra) { bestExtra = extra; best = el; }
+      }
+    }
+    if (best) return best;
+
+    // Strategy 3: legacy selectors
+    return main.querySelector('[tabindex="-1"]')
+        || main.querySelector('.copyable-area');
+  }
+
+  // Walk DOM in document order; track date context; collect image entries
+  function collectMedia(chatPane) {
+    const results = [];
+    const seenSrc  = new Set();
+    const seenUnloaded = new Set();
+    let currentDate = null;
+
+    for (const el of chatPane.querySelectorAll('*')) {
+      // ── date separator bubble ──────────────────────────
+      if (el.dataset.testid === 'conv-info-daily-date-separator') {
+        const d = parseSeparatorText(el.textContent);
+        if (d) currentDate = d;
+      }
+
+      // ── message timestamp via data-pre-plain-text ──────
+      const ppt = el.getAttribute('data-pre-plain-text');
+      if (ppt) {
+        const d = parsePlainTextDate(ppt);
+        if (d) currentDate = d;
+      }
+
+      // ── loaded image (<img src="blob:…">) ─────────────
+      if (el.tagName === 'IMG' && el.src?.startsWith('blob:') && !seenSrc.has(el.src)) {
+        const w = el.naturalWidth  || el.width;
+        const h = el.naturalHeight || el.height;
+        if (w > 60 && h > 60) {
+          seenSrc.add(el.src);
+          results.push({ type: 'loaded', src: el.src, date: currentDate ? new Date(currentDate) : null });
+        }
+      }
+
+      // ── CSS background-image blob (thumbnails / previews) ──
+      if (el.style?.backgroundImage?.includes('blob:') && el.tagName !== 'IMG') {
+        const raw = el.style.backgroundImage;
+        const srcMatch = raw.match(/url\(["']?(blob:[^"')]+)["']?\)/);
+        if (srcMatch && !seenSrc.has(srcMatch[1])) {
+          const r = el.getBoundingClientRect();
+          if (r.width > 60 && r.height > 60) {
+            seenSrc.add(srcMatch[1]);
+            results.push({ type: 'loaded', src: srcMatch[1], date: currentDate ? new Date(currentDate) : null });
+          }
+        }
+      }
+
+      // ── unloaded image: WhatsApp "download" button overlay ──
+      // These appear when the image hasn't been downloaded to this device yet
+      const testId = el.dataset.testid || '';
+      const aria   = (el.getAttribute('aria-label') || '').toLowerCase();
+      const isDownloadBtn = testId.includes('download') || aria === 'download';
+      if (isDownloadBtn) {
+        // Make sure it's inside a message (not the top-bar download icon etc.)
+        const msgCtx = el.closest('[data-pre-plain-text]') || el.closest('[data-id]');
+        if (msgCtx && !seenUnloaded.has(msgCtx)) {
+          seenUnloaded.add(msgCtx);
+          results.push({ type: 'unloaded', btn: el, date: currentDate ? new Date(currentDate) : null });
+        }
+      }
+    }
+
+    return results;
+  }
+
+  // Download a blob URL → anchor-click trick
+  async function downloadBlob(src, filename) {
+    try {
+      const resp = await fetch(src, { credentials: 'include' });
+      if (!resp.ok) throw new Error(resp.status);
+      const blob = await resp.blob();
+      const url  = URL.createObjectURL(blob);
+      const a    = Object.assign(document.createElement('a'), { href: url, download: filename });
+      document.body.appendChild(a);
+      a.click();
+      await sleep(400);
+      a.remove();
+      URL.revokeObjectURL(url);
+      return true;
+    } catch (e) {
+      console.warn('[WA-DL] fetch failed:', src, e.message);
+      return false;
+    }
+  }
+
+  // Click WhatsApp's own download button and wait for the img to appear
+  async function triggerUnloadedDownload(btn) {
+    // Find nearest message container before clicking
+    const msgCtx = btn.closest('[data-pre-plain-text]') || btn.closest('[data-id]') || btn.parentElement;
+    const blobsBefore = new Set(
+      [...(msgCtx?.querySelectorAll('img[src^="blob:"]') || [])].map(i => i.src)
+    );
+
+    // Simulate a real click
+    btn.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    await sleep(300);
+    btn.click();
+
+    // Wait up to 12 s for a new blob img to appear
+    for (let t = 0; t < 24; t++) {
+      await sleep(500);
+      const newImgs = [...(msgCtx?.querySelectorAll('img[src^="blob:"]') || [])]
+        .filter(i => !blobsBefore.has(i.src) && (i.naturalWidth || i.width) > 60);
+      if (newImgs.length > 0) return newImgs[0].src;
+    }
+    return null; // WhatsApp's own save-to-disk already triggered
+  }
+
+  // ── Main ─────────────────────────────────────────────────
+  document.getElementById('wa-start-btn').onclick = async () => {
+    const startVal = document.getElementById('wa-start').value;
+    const endVal   = document.getElementById('wa-end').value;
+    const startDate = startVal ? new Date(startVal + 'T00:00:00') : null;
+    const endDate   = endVal   ? new Date(endVal   + 'T23:59:59') : null;
+
+    if (startDate && endDate && startDate > endDate) {
+      setStatus('⚠️ "From" date must be before "To" date.', '#c00');
+      return;
+    }
+
+    const btn = document.getElementById('wa-start-btn');
+    btn.disabled = true; btn.style.opacity = '0.55';
+
+    const chatPane = findScrollContainer();
+    if (!chatPane) {
+      setStatus('⚠️ Could not find the chat window. Please make sure a chat is open.', '#c00');
+      btn.disabled = false; btn.style.opacity = '1';
+      return;
+    }
+
+    // ── Phase 1: scroll up to load older messages ────────
+    setStatus('🔄 Scrolling to load messages… this may take a moment.');
+    let prevHeight = -1, noChangeRounds = 0;
+    const MAX_ROUNDS = 8; // safety cap — stop after ~12 s of no new content
+
+    while (noChangeRounds < MAX_ROUNDS) {
+      chatPane.scrollTop = 0;
+      await sleep(1500);
+
+      const h = chatPane.scrollHeight;
+      if (h === prevHeight) {
+        noChangeRounds++;
+      } else {
+        noChangeRounds = 0;
+        prevHeight = h;
+      }
+
+      // Early exit: if start date set and oldest separator is already past it, stop
+      if (startDate) {
+        const seps = [...chatPane.querySelectorAll('[data-testid="conv-info-daily-date-separator"]')];
+        if (seps.length > 0) {
+          const oldestDate = parseSeparatorText(seps[0].textContent);
+          if (oldestDate && oldestDate <= startDate) break;
+        }
+      }
+
+      setStatus(`🔄 Loading messages… (scroll height: ${h.toLocaleString()}px)`);
+    }
+
+    // Scroll back to bottom then let it settle before scanning
+    chatPane.scrollTop = chatPane.scrollHeight;
+    await sleep(800);
+    chatPane.scrollTop = 0;
+    await sleep(1200);
+
+    // ── Phase 2: collect all media ───────────────────────
+    setStatus('🔍 Scanning messages for images…');
+    const all = collectMedia(chatPane);
+
+    if (all.length === 0) {
+      setStatus(
+        '⚠️ No images found in the visible messages.<br>' +
+        'Try scrolling through the chat manually first so images load, then run the script again.',
+        '#c00'
+      );
+      btn.disabled = false; btn.style.opacity = '1';
+      return;
+    }
+
+    // Filter by date
+    function inRange(item) {
+      if (!item.date) return true; // unknown date → include (conservative)
+      if (startDate && item.date < startDate) return false;
+      if (endDate   && item.date > endDate)   return false;
+      return true;
+    }
+
+    const toDownload = all.filter(inRange);
+    const outOfRange = all.length - toDownload.length;
+
+    if (toDownload.length === 0) {
+      setStatus(
+        `⚠️ Found ${all.length} image(s) but none are in the selected date range.` +
+        (outOfRange > 0 ? `<br>${outOfRange} image(s) were outside the range.` : ''),
+        '#c00'
+      );
+      btn.disabled = false; btn.style.opacity = '1';
+      return;
+    }
+
+    // ── Phase 3: download ─────────────────────────────────
+    let ok = 0, skipped = 0, waDownloaded = 0;
+
+    for (let i = 0; i < toDownload.length; i++) {
+      const item = toDownload[i];
+      setStatus(`📥 Downloading ${i + 1} / ${toDownload.length}…`);
+
+      const dateStr  = item.date ? item.date.toISOString().slice(0, 10) : 'unknown-date';
+      const idx      = String(i + 1).padStart(3, '0');
+      const filename = `whatsapp_${dateStr}_${idx}.jpg`;
+
+      if (item.type === 'loaded') {
+        const success = await downloadBlob(item.src, filename);
+        if (success) ok++; else skipped++;
+      } else {
+        // Unloaded image: try to trigger load then grab blob, otherwise let WA handle it
+        setStatus(`📥 Loading image ${i + 1} / ${toDownload.length} (preview → full quality)…`);
+        const newSrc = await triggerUnloadedDownload(item.btn);
+        if (newSrc) {
+          const success = await downloadBlob(newSrc, filename);
+          if (success) ok++; else skipped++;
+        } else {
+          // WhatsApp's own download button handled it → file saved by browser
+          waDownloaded++;
+        }
+      }
+
+      await sleep(250);
+    }
+
+    let summary = `✅ Done! ${ok} image(s) saved to your Downloads folder.`;
+    if (waDownloaded > 0) summary += `<br>${waDownloaded} image(s) were downloaded directly by WhatsApp.`;
+    if (skipped > 0)      summary += `<br>⚠️ ${skipped} could not be fetched.`;
+    setStatus(summary, '#0a7a3e');
+
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.textContent = '▶ Download Again';
+  };
+})();

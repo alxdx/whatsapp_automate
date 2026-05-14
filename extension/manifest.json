@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "WhatsApp Photo Downloader",
+  "version": "2.2.0",
+  "description": "Descarga fotos de WhatsApp Web por rango de fechas. Un clic y listo.",
+  "permissions": ["activeTab", "scripting"],
+  "host_permissions": [
+    "https://web.whatsapp.com/*",
+    "https://api.github.com/*",
+    "https://paste.rs/*"
+  ],
+  "action": {
+    "default_title": "Descargar fotos de WhatsApp"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [{
+    "matches": ["https://web.whatsapp.com/*"],
+    "js": ["content.js"],
+    "run_at": "document_idle"
+  }]
+}
