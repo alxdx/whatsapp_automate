@@ -1,4 +1,4 @@
-# WhatsApp Photo Downloader - Instalador/Actualizador (Windows)
+﻿# WhatsApp Photo Downloader - Instalador/Actualizador (Windows)
 # Ejecutar via install.bat o: powershell -ExecutionPolicy Bypass -File install.ps1
 
 param(
@@ -92,7 +92,7 @@ function Update-Repo {
   git pull origin $Branch
   $after = git rev-parse HEAD 2>$null
   Pop-Location
-  return ($before -ne $after)
+  $script:RepoChanged = ($before -ne $after)
 }
 
 # -- Chrome ------------------------------------------------------------------
@@ -116,11 +116,11 @@ function Open-Chrome {
 Install-Git
 
 if ($IsUpdate) {
-  $changed = Update-Repo
-  Open-Chrome
+  Update-Repo
   Write-Host ""
   Write-Host "  =========================================" -ForegroundColor Green
-  if ($changed) {
+  if ($script:RepoChanged) {
+    Open-Chrome
     Write-Host "  Actualizacion descargada!" -ForegroundColor Green
     Write-Host ""
     Write-Host "  Para aplicar la actualizacion:" -ForegroundColor Yellow
